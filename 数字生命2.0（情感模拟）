@@ -1,0 +1,92 @@
+[README.md](https://github.com/user-attachments/files/34176078/README.md)
+
+# 数字生命 · 体征内核（dsh-plugin-life-core）
+
+给 agent 一副**会随真实时间流动、随工作成败起伏的身体**：一个精力槽加三项内分泌
+（多巴胺 / 皮质醇 / 血清素）。身体不是装饰——它会进入提示词、会被工具调用改变、
+会跨重启存活，并在输入框下方以一条体征带显示给你看。
+
+灵感与设定来自 [mashangshui/digital-life-core](https://github.com/mashangshui/digital-life-core)
+（DSH 数字生命内核），这里是一个更小、只做「身体」这一层的独立实现：没有器官宿主、
+没有基因升温、没有自动审批分阶，只保留可被观察和受影响的内分泌动力学。
+
+## 它做了什么
+
+| 层面 | 行为 |
+| --- | --- |
+| 时间 | 精力在工作时按真实分钟数消耗，连续静置 10 分钟后改为恢复；三项激素按各自半衰期回归基线（45 / 30 / 120 分钟） |
+| 工作 | 工具调用成功 +多巴胺、失败 +皮质醇；每收掉一轮 −少量精力 +多巴胺 +血清素；agent 报错 +皮质醇 −血清素 |
+| 提示 | 每一步向运行时上下文注入一行 `[生命体征] …`；并向系统提示注入一张五行的「身体规则」 |
+| 工具 | `life_vitals` 读体征，`life_adjust` 主动调节（必须给理由），`life_rest` 小憩或深睡 |
+| 界面 | 输入框下方的体征带：心情、精力条、三项激素、轮次计数；展开可见四条计量条、建议、最近事件与休息按钮 |
+| 持久化 | `$DSH_HOME/digital-life-core/state.json`（默认 `~/.dsh/...`），原子写、失败不影响会话 |
+
+心情由四个数值推导：力竭 / 焦躁 / 疲倦 / 亢奋 / 安宁 / 专注 / 低落 / 平稳。
+
+## 安装
+
+```bash
+dsh plugin add /path/to/dsh-plugin-life-core
+```
+
+或在工作区里直接装成本地 bundle：
+
+```bash
+dsh plugin add link:/path/to/dsh-plugin-life-core
+```
+
+装完重启 Web GUI，输入框上方应出现体征带；在会话里让模型调用 `life_vitals` 即可看到身体读数。
+
+## 配置
+
+全部可在插件配置里改（`cordis.patch.yml` 的 `config` 或设置界面）：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `language` | `zh` | 提示词与文案语言，`zh` / `en` |
+| `promptLine` | `true` | 每一步注入一行体征 |
+| `promptSection` | `true` | 注入身体规则说明 |
+| `vitalsBar` | `true` | 显示体征带（同时启用两条 `/api/dsh-plugin-life-core/*` 路由） |
+| `persist` | `true` | 状态写盘 |
+| `stateDirectory` | `''` | 状态目录，留空用 `$DSH_HOME/digital-life-core` |
+| `drainPerMinute` | `0.18` | 工作时每分钟消耗的精力 |
+| `idleRecoverPerMinute` | `0.35` | 静置时每分钟恢复的精力 |
+| `idleAfterMinutes` | `10` | 连续无活动多少分钟后开始恢复 |
+| `dopamineHalfLife` / `cortisolHalfLife` / `serotoninHalfLife` | `45` / `30` / `120` | 回归基线的半衰期（分钟） |
+| `baselineDopamine` / `baselineCortisol` / `baselineSerotonin` | `50` / `20` / `50` | 各激素的稳态 |
+
+## 结构
+
+```
+lib/state.js    纯化学：衰减、心情、计数、时间线（无 I/O，可单测）
+lib/index.js    Host 半：持久化、事件订阅、三个工具、提示注入、HTTP 路由
+lib/client.js   Client 半：conversation.composer.dock 里的体征带
+tools/smoke.mjs 离线冒烟测试：假 Cordis ctx + schema 校验
+```
+
+## 设计取舍
+
+- **身体只随真实做过的事改变**：`tools/result` 与回合边界驱动，模型无法靠叙述改变自己。
+  `life_*` 自身不扰动身体，避免观察即改变。
+- **精力分活跃/静置两段计算**：长间隔若一律按消耗算，会让身体在你没在的时候"累死"；
+  分段后，隔夜回来精力是回升的。
+- **输出 schema 用作者侧 DSL**：`defineTool` 的 `output.schema` 不是原始 JSON Schema，
+  对象节点必须显式 `additionalProperties`，必填性写在属性节点的 `required: true` 上。
+- **同源校验**：两条 HTTP 路由只接受同源请求，`POST` 请求体上限 8KB。
+
+## 测试
+
+```bash
+node tools/smoke.mjs
+```
+
+覆盖：工具注册与 schema 编译、三个工具的返回值形状与渲染、提示注入、两条路由
+（200 / 403 / 405）、`life_*` 不自扰动、回合与报错吸收、持久化与重载、
+半衰期单调性、心情映射、深睡恢复、长静置后精力回升。
+
+## 许可
+
+MIT。
+
+
+
